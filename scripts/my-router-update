@@ -35,9 +35,22 @@ mkdir -p "$STATE_DIR" "$WORK"
 current=$(cat "$STATE_DIR/version" 2>/dev/null || echo "")
 
 # Ask GitHub for the current head of the branch.
+#
+# The API sends "cache-control: public, max-age=60, s-maxage=60", so for a
+# minute after a push the CDN edge still serves the PREVIOUS commit and the
+# router concludes it is up to date. A unique query parameter makes each
+# request its own cache key, which is the only thing that reliably defeats it
+# (request-side no-cache headers and the git/refs endpoint do not).
+cache_bust=$(date +%s)-$$
 remote=$(curl -fsS --max-time 30 \
     -H 'Accept: application/vnd.github.sha' \
-    "https://api.github.com/repos/$REPO/commits/$BRANCH" 2>/dev/null)
+    -H 'Cache-Control: no-cache' \
+    "https://api.github.com/repos/$REPO/commits/$BRANCH?cb=$cache_bust" 2>/dev/null)
+
+# Guard against a proxy handing back an error page or HTML instead of a SHA.
+case "$remote" in
+    *[!0-9a-f]* | "") remote="" ;;
+esac
 
 if [ -z "$remote" ]; then
     log "could not reach GitHub (offline or repo unavailable); keeping current version"

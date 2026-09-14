@@ -48,7 +48,10 @@ do_reconnect() {
 do_reload() { /etc/init.d/netshift restart; }
 
 # Update: pull the latest master from GitHub and apply it.
-do_update() { /usr/bin/my-router-update --force; }
+# No --force: that would re-download and reinstall on every click even when
+# nothing changed. The updater already applies whatever differs from the
+# recorded SHA.
+do_update() { /usr/bin/my-router-update; }
 
 # --- status --------------------------------------------------------------
 
