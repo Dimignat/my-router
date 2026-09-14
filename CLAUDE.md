@@ -102,6 +102,7 @@ netshift list_update         # refresh domain lists (also runs daily at 09:13 vi
 | Repo path | On the router | Purpose |
 |---|---|---|
 | `www/` | `/www/app/` | Kiosk GUI, served by stock uhttpd |
+| `www/img/background.webp` | `/www/app/img/` | Background photo (see below) |
 | `cgi-bin/router-api` | `/www/cgi-bin/router-api` | JSON control API (CGI) |
 | `cgi-bin/index-router` | `/www/cgi-bin/index-router` | Root dispatcher: GUI on the friendly name, LuCI otherwise |
 | `scripts/my-router-update` | `/usr/bin/my-router-update` | Pulls master, applies it |
@@ -164,6 +165,34 @@ targets, and a status lamp that always pairs colour with words.
 
 The footer shows the running node and the installed commit (`Версия fdb1cc7`),
 so you can tell at a glance which version a device is on without SSH.
+
+### Changing the background
+
+The page background is `www/img/background.webp`. To change it on every
+router, replace that file and push:
+
+```bash
+cp /path/to/new.webp www/img/background.webp
+git commit -am "New background" && git push
+```
+
+Routers pick it up on the next 15-minute poll, or immediately via the
+**Проверить обновления** button.
+
+- Keep the same filename, or update the `url()` in `www/style.css`.
+- WebP, JPEG and PNG all work. Keep it small — it ships to every router over
+  the tunnel, and the overlay has ~150 MB free. The current file is 10 KB.
+- The installer stamps `?v=<timestamp>` onto the stylesheet, script and
+  background URL on every install. **This matters:** uhttpd sends `ETag` and
+  `Last-Modified` but no `Cache-Control`, so without the stamp a browser that
+  already cached the old photo would keep showing it after a push.
+- A portrait is cropped with `background-position: center 15%` so the subject
+  survives tall phone viewports; adjust that if a new image crops badly.
+- The photo sits under a dark scrim (`body::after`) that holds text contrast.
+  If you swap in a much lighter or busier image, re-check legibility rather
+  than assuming — the scrim is tuned, not magic.
+- If the file is missing the page falls back to the original gradient, so a
+  broken image degrades rather than blanking the page.
 
 ### API
 

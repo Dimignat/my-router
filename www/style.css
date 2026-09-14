@@ -29,6 +29,34 @@ body {
   align-items: center;
   justify-content: center;
   padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  position: relative;
+  isolation: isolate;
+}
+
+/* Background photo, swappable by replacing www/img/background.webp in the
+   repo. Kept on a pseudo-element so the scrim below can darken the photo
+   without touching the cards' own translucency.
+   If the file is missing the body gradient above still shows, so a bad or
+   half-copied image degrades to the old look rather than an empty page. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background: var(--bg-image, url("img/background.webp")) center 15% / cover no-repeat;
+}
+
+/* Scrim: the photo is high-contrast, so without this the status text and the
+   button labels lose legibility over the bright areas. Tuned to keep the
+   image clearly visible while holding text contrast well above 4.5:1. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, rgba(8, 13, 24, .72) 0%, rgba(8, 13, 24, .82) 100%);
+  backdrop-filter: blur(3px) saturate(.9);
 }
 
 .wrap { width: 100%; max-width: 30rem; }
@@ -38,10 +66,12 @@ body {
 .status {
   text-align: center;
   padding: 2rem 1.25rem 2.25rem;
-  background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
-  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(21, 31, 51, .82) 0%, rgba(28, 41, 66, .88) 100%);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, .1);
   border-radius: 1.5rem;
   margin-bottom: 1.25rem;
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, .35);
 }
 
 .lamp {
@@ -49,8 +79,8 @@ body {
   margin: 0 auto 1.25rem;
   border-radius: 50%;
   display: grid; place-items: center;
-  background: #0e1729;
-  border: 1px solid var(--line);
+  background: rgba(14, 23, 41, .75);
+  border: 1px solid rgba(255, 255, 255, .12);
   transition: box-shadow .4s ease;
 }
 .lamp-dot {
@@ -88,17 +118,19 @@ body {
   padding: 1rem 1.25rem;
   text-align: left;
   color: var(--text);
-  background: var(--card);
-  border: 1px solid var(--line);
+  background: rgba(21, 31, 51, .8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, .1);
   border-radius: 1.125rem;
   font: inherit;
   cursor: pointer;
+  box-shadow: 0 .5rem 1.5rem rgba(0, 0, 0, .28);
   transition: transform .12s ease, background .2s ease, border-color .2s ease;
 }
-.btn:active { transform: scale(.98); background: var(--card-2); }
+.btn:active { transform: scale(.98); background: rgba(28, 41, 66, .92); }
 .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
-.btn-primary { background: linear-gradient(180deg, #2563eb, #1d4ed8); border-color: #3b82f6; }
+.btn-primary { background: linear-gradient(180deg, rgba(37, 99, 235, .94), rgba(29, 78, 216, .94)); border-color: #3b82f6; }
 .btn-primary:active { background: linear-gradient(180deg, #1d4ed8, #1e40af); }
 
 .btn-icon { flex: 0 0 auto; width: 2.5rem; height: 2.5rem; opacity: .95; }
@@ -117,11 +149,12 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   gap: 1rem;
   font-size: .8125rem; color: var(--muted);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
 }
 
 /* The update button is the least-used action, so it is quieter than the
    other two without being hard to hit. */
-#btn-update { min-height: 4.5rem; background: transparent; }
+#btn-update { min-height: 4.5rem; background: rgba(21, 31, 51, .55); }
 #btn-update .btn-title { font-size: 1.125rem; font-weight: 600; }
 #btn-update:active { background: var(--card); }
 
@@ -158,8 +191,9 @@ body {
   padding: .9rem 1.25rem;
   border-radius: .875rem;
   font-size: 1rem; font-weight: 600; text-align: center;
-  background: var(--card-2); border: 1px solid var(--line);
-  box-shadow: 0 .75rem 2rem rgba(0, 0, 0, .45);
+  background: #1c2942; border: 1px solid var(--line);
+  color: #f1f5f9;
+  box-shadow: 0 .75rem 2rem rgba(0, 0, 0, .55);
   animation: rise .25s ease;
 }
 .toast[hidden] { display: none; }
@@ -171,15 +205,9 @@ body {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
-/* Light mode: some users will have their phone set to it. */
+/* No light-mode override: the background photo sits under a dark scrim, so the
+   page is dark in both OS themes and light text stays correct either way.
+   Only the toasts need pinning, since they are opaque. */
 @media (prefers-color-scheme: light) {
-  :root {
-    --bg: #eef2f8; --card: #fff; --card-2: #f5f8fd; --line: #d3dceb;
-    --text: #0f172a; --muted: #5b6b85;
-  }
-  body { background: radial-gradient(120% 80% at 50% 0%, #fff 0%, var(--bg) 60%); }
-  .lamp { background: #f1f5fb; }
-  .btn-primary { color: #fff; }
-  .toast.is-ok  { background: #dcfce7; color: #14532d; }
-  .toast.is-bad { background: #fee2e2; color: #7f1d1d; }
+  .toast { color: var(--text); }
 }

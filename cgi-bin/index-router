@@ -14,8 +14,9 @@ case "$HOST" in
             printf 'Content-Type: text/html; charset=utf-8\r\n'
             printf 'Cache-Control: no-cache\r\n\r\n'
             # Rewrite relative asset paths so the page works from "/".
-            sed -e 's|href="style.css"|href="/app/style.css"|' \
-                -e 's|src="app.js"|src="/app/app.js"|' "$APP"
+            # Keeps any ?v= cache-buster the installer stamped in.
+            sed -e 's|href="style\.css|href="/app/style.css|' \
+                -e 's|src="app\.js|src="/app/app.js|' "$APP"
             exit 0
         fi
         ;;

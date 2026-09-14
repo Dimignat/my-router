@@ -32,6 +32,23 @@ mkdir -p "$WWW"
 rm -rf "$WWW.new"
 mkdir -p "$WWW.new"
 cp -r "$SRC/www/." "$WWW.new/"
+# Drop macOS resource-fork junk that rides along in tarballs.
+find "$WWW.new" -name '._*' -delete 2>/dev/null
+find "$WWW.new" -name '.DS_Store' -delete 2>/dev/null
+
+# Cache-bust the stylesheet and background so a pushed image actually reaches
+# browsers that already cached the old one. uhttpd sends ETag/Last-Modified
+# but no Cache-Control, so without this a viewer can keep the previous photo.
+STAMP=$(date +%s)
+if [ -f "$WWW.new/index.html" ]; then
+    sed -i "s|href=\"style.css\"|href=\"style.css?v=$STAMP\"|; s|src=\"app.js\"|src=\"app.js?v=$STAMP\"|" \
+        "$WWW.new/index.html"
+fi
+if [ -f "$WWW.new/style.css" ]; then
+    sed -i "s|url(\"img/background\.\([a-z]*\)\")|url(\"img/background.\1?v=$STAMP\")|g" \
+        "$WWW.new/style.css"
+fi
+
 rm -rf "$WWW.old"
 [ -d "$WWW" ] && mv "$WWW" "$WWW.old"
 mv "$WWW.new" "$WWW"
