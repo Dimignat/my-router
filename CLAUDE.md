@@ -132,7 +132,10 @@ targets, and a status lamp that always pairs colour with words.
 |---|---|---|---|
 | **Переподключиться** (Reconnect) | `?action=reconnect` | Re-tests node latency, forces the urltest group to re-pick. Existing connections survive. | ~5 s |
 | **Перезапустить** (Reload) | `?action=reload` | `/etc/init.d/netshift restart`. Internet blips; **Wi-Fi stays up**, nobody is kicked off. | ~10 s |
-| Обновить программу (link) | `?action=update` | Forces a pull from GitHub now. | ~10 s |
+| **Проверить обновления** (Update) | `?action=update` | Pulls master from GitHub immediately instead of waiting for the 15-min cron. Reports whether a new version was installed or the router was already current. | ~5 s |
+
+The footer shows the running node and the installed commit (`Версия fdb1cc7`),
+so you can tell at a glance which version a device is on without SSH.
 
 ### API
 
@@ -166,6 +169,8 @@ deliberate trade for one-tap use. Don't expose it to the WAN.
 ## 5. Auto-update from GitHub
 
 Repo: **https://github.com/Dimignat/my-router** (public, branch `master`).
+Push over SSH (`git@github.com:Dimignat/my-router.git`) — an HTTPS push has no
+cached credential on the dev machine.
 
 Every router runs `*/15 * * * * /usr/bin/my-router-update`. Each run:
 
