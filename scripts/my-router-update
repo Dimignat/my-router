@@ -1,0 +1,95 @@
+#!/bin/sh
+# Pull the latest master from GitHub and apply it to this router.
+# There is no git binary on OpenWrt, so we compare the master commit SHA via
+# the GitHub API and download a tarball when it differs.
+#
+#   my-router-update           check and apply only if the SHA changed
+#   my-router-update --force   re-apply even if the SHA is unchanged
+#   my-router-update --check   report only, change nothing (exit 10 = update available)
+
+set -u
+
+REPO="${MY_ROUTER_REPO:-Dimignat/my-router}"
+BRANCH="${MY_ROUTER_BRANCH:-master}"
+STATE_DIR=/etc/my-router
+WORK=/tmp/my-router-update.$$
+LOCK=/var/lock/my-router-update.lock
+
+FORCE=0; CHECK_ONLY=0
+case "${1:-}" in
+    --force) FORCE=1 ;;
+    --check) CHECK_ONLY=1 ;;
+esac
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; logger -t my-router-update "$*"; }
+cleanup() { rm -rf "$WORK"; rmdir "$LOCK" 2>/dev/null; }
+
+# Single-instance guard: cron and the GUI button can both call this.
+if ! mkdir "$LOCK" 2>/dev/null; then
+    log "another update is already running, skipping"
+    exit 0
+fi
+trap cleanup EXIT INT TERM
+
+mkdir -p "$STATE_DIR" "$WORK"
+current=$(cat "$STATE_DIR/version" 2>/dev/null || echo "")
+
+# Ask GitHub for the current head of the branch.
+remote=$(curl -fsS --max-time 30 \
+    -H 'Accept: application/vnd.github.sha' \
+    "https://api.github.com/repos/$REPO/commits/$BRANCH" 2>/dev/null)
+
+if [ -z "$remote" ]; then
+    log "could not reach GitHub (offline or repo unavailable); keeping current version"
+    exit 1
+fi
+
+log "current=${current:-none} remote=$remote"
+
+if [ "$CHECK_ONLY" = "1" ]; then
+    [ "$current" = "$remote" ] && { log "up to date"; exit 0; }
+    log "update available: $remote"
+    exit 10
+fi
+
+if [ "$current" = "$remote" ] && [ "$FORCE" = "0" ]; then
+    log "already up to date"
+    exit 0
+fi
+
+log "downloading $REPO@$remote"
+if ! curl -fsSL --max-time 120 \
+        "https://codeload.github.com/$REPO/tar.gz/$remote" \
+        -o "$WORK/src.tar.gz"; then
+    log "download failed; keeping current version"
+    exit 1
+fi
+
+if ! tar -xzf "$WORK/src.tar.gz" -C "$WORK"; then
+    log "tarball is corrupt; keeping current version"
+    exit 1
+fi
+
+SRC=$(find "$WORK" -maxdepth 1 -type d -name "*-$remote*" | head -1)
+[ -z "$SRC" ] && SRC=$(find "$WORK" -maxdepth 1 -mindepth 1 -type d ! -name '*.tar.gz' | head -1)
+
+if [ ! -d "$SRC/www" ] || [ ! -f "$SRC/cgi-bin/router-api" ]; then
+    log "downloaded tree is missing expected files; aborting without changes"
+    exit 1
+fi
+
+# Hand off to the repo's own installer so update logic ships with the content.
+if [ -x "$SRC/scripts/install.sh" ]; then
+    log "running installer"
+    if ! sh "$SRC/scripts/install.sh" --from-update "$SRC"; then
+        log "installer failed; router left on previous version"
+        exit 1
+    fi
+else
+    log "no installer in tree; aborting"
+    exit 1
+fi
+
+echo "$remote" > "$STATE_DIR/version"
+date '+%Y-%m-%d %H:%M:%S' > "$STATE_DIR/last-update"
+log "updated to $remote"

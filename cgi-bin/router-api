@@ -1,0 +1,110 @@
+#!/bin/sh
+# my-router control API (CGI, served by uhttpd).
+# Actions are triggered by the kiosk UI in /www/app/. Long jobs are detached
+# and polled via ?action=job_status so uhttpd's script_timeout never bites.
+
+JOB_DIR=/tmp/my-router-jobs
+STATE_DIR=/tmp/my-router
+PROXY_GROUP=redshield-out
+URLTEST_GROUP=redshield-urltest-out
+mkdir -p "$JOB_DIR" "$STATE_DIR"
+
+printf 'Content-Type: application/json; charset=utf-8\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+# Parse QUERY_STRING into action/job (no eval: query data is untrusted).
+action=''; job=''
+for pair in $(echo "${QUERY_STRING:-}" | tr '&' ' '); do
+    case "$pair" in
+        action=*) action=${pair#action=} ;;
+        job=*)    job=${pair#job=} ;;
+    esac
+done
+# Whitelist: strip anything that is not an allowed character.
+action=$(echo "$action" | tr -cd 'a-z_')
+job=$(echo "$job" | tr -cd 'a-zA-Z0-9_-')
+
+json_err() { printf '{"ok":false,"error":"%s"}\n' "$1"; exit 0; }
+
+# Detach a job: returns a job id the UI polls. Output lands in $JOB_DIR/<id>.
+spawn_job() {
+    id="$(date +%s)-$$"
+    : > "$JOB_DIR/$id.log"
+    ( "$@" >"$JOB_DIR/$id.log" 2>&1; echo $? > "$JOB_DIR/$id.rc" ) &
+    printf '{"ok":true,"job":"%s"}\n' "$id"
+}
+
+# --- job implementations -------------------------------------------------
+
+# Reconnect: re-measure every node, then force the urltest group to re-pick.
+# Does NOT restart the service, so existing connections survive.
+do_reconnect() {
+    /usr/bin/netshift clash_api get_group_latency "$URLTEST_GROUP"
+    # Re-assert the urltest selector so the group commits to the new winner.
+    /usr/bin/netshift clash_api set_group_proxy "$PROXY_GROUP" "$URLTEST_GROUP"
+}
+
+# Reload: restart the VPN service only. Wi-Fi and LAN stay up.
+do_reload() { /etc/init.d/netshift restart; }
+
+# Update: pull the latest master from GitHub and apply it.
+do_update() { /usr/bin/my-router-update --force; }
+
+# --- status --------------------------------------------------------------
+
+emit_status() {
+    enabled=$(/usr/bin/netshift get_status 2>/dev/null | jsonfilter -e '@.enabled' 2>/dev/null)
+    [ -z "$enabled" ] && enabled=0
+
+    # Which node is actually carrying traffic right now, and its last latency.
+    proxies=$(/usr/bin/netshift clash_api get_proxies 2>/dev/null)
+    now=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$URLTEST_GROUP\"].now" 2>/dev/null)
+    [ -z "$now" ] && now=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$PROXY_GROUP\"].now" 2>/dev/null)
+    delay=''
+    [ -n "$now" ] && delay=$(echo "$proxies" | jsonfilter \
+        -e "@.proxies[\"$now\"].history[-1].delay" 2>/dev/null)
+
+    # Real connectivity check: can we actually reach the internet through it?
+    if [ -f "$STATE_DIR/online" ] &&
+       [ "$(( $(date +%s) - $(cat "$STATE_DIR/online.ts" 2>/dev/null || echo 0) ))" -lt 30 ]; then
+        online=$(cat "$STATE_DIR/online")
+    else
+        if curl -s -o /dev/null --max-time 6 \
+             -w '%{http_code}' https://www.gstatic.com/generate_204 2>/dev/null \
+             | grep -q '^20'; then online=1; else online=0; fi
+        echo "$online" > "$STATE_DIR/online"
+        date +%s > "$STATE_DIR/online.ts"
+    fi
+
+    # After a restart sing-box needs a few seconds before the urltest group
+    # reports a winner. That is "settling", not a fault.
+    settling=0
+    [ "$enabled" = "1" ] && [ -z "$now" ] && settling=1
+
+    ver=$(cat /etc/my-router/version 2>/dev/null || echo unknown)
+    up=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
+
+    printf '{"ok":true,"vpn_enabled":%s,"online":%s,"settling":%s,"node":"%s","latency":%s,"version":"%s","uptime":%s}\n' \
+        "$enabled" "$online" "$settling" "${now:-unknown}" "${delay:-null}" "$ver" "$up"
+}
+
+# --- dispatch ------------------------------------------------------------
+
+case "$action" in
+    status)    emit_status ;;
+    reconnect) spawn_job do_reconnect ;;
+    reload)    spawn_job do_reload ;;
+    update)    spawn_job do_update ;;
+    job_status)
+        [ -z "$job" ] && json_err "missing job id"
+        [ -f "$JOB_DIR/$job.log" ] || json_err "unknown job"
+        if [ -f "$JOB_DIR/$job.rc" ]; then
+            rc=$(cat "$JOB_DIR/$job.rc")
+            [ "$rc" = "0" ] && st=done || st=failed
+        else
+            st=running; rc=null
+        fi
+        printf '{"ok":true,"state":"%s","rc":%s}\n' "$st" "${rc:-null}"
+        ;;
+    *) json_err "unknown action" ;;
+esac
