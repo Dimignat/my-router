@@ -7,6 +7,20 @@
 
 APP=/www/app/index.html
 HOST=$(echo "${HTTP_HOST:-}" | tr 'A-Z' 'a-z' | cut -d: -f1)
+PATH_INFO_CLEAN=${REQUEST_URI%%\?*}
+
+# uhttpd routes every missing path here, not just "/". Anything else that is
+# genuinely absent must still 404, or missing assets come back as HTML with
+# 200 and silently mask real breakage.
+case "$PATH_INFO_CLEAN" in
+    ""|"/") ;;
+    *)
+        printf 'Status: 404 Not Found\r\n'
+        printf 'Content-Type: text/plain; charset=utf-8\r\n\r\n'
+        printf 'Not found\n'
+        exit 0
+        ;;
+esac
 
 case "$HOST" in
     router.lan|router)

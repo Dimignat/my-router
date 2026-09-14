@@ -197,6 +197,30 @@ el('btn-update').addEventListener('click', function () {
     });
 });
 
+/* ---------- intro ---------- */
+
+// The animation is pure CSS, so the page is usable even if this never runs.
+// This only tidies up: drop the splash node once it has played, and let a tap
+// skip the remainder for anyone who does not want to wait.
+(function () {
+  var splash = el('splash');
+  if (!splash) return;
+
+  var done = false;
+  function finish() {
+    if (done) return;
+    done = true;
+    document.body.classList.remove('intro');
+    if (splash.parentNode) splash.parentNode.removeChild(splash);
+  }
+
+  splash.addEventListener('animationend', finish);
+  document.addEventListener('pointerdown', finish, { once: true });
+  // Backstop in case animationend never fires (animation disabled, tab
+  // backgrounded during load, older browser).
+  setTimeout(finish, 2600);
+})();
+
 /* ---------- start ---------- */
 
 refresh().then(scheduleRefresh);

@@ -61,6 +61,45 @@ body::after {
 
 .wrap { width: 100%; max-width: 30rem; }
 
+/* ---------- intro ---------- */
+
+/* The photo shown full-bleed on load. It is a separate fixed layer above the
+   body background so it can fade and scale independently, which reads as the
+   image receding into place rather than simply disappearing. */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: var(--bg-image, url("img/background.webp")) center 15% / cover no-repeat;
+  transform-origin: center 20%;
+  animation: splash-out .7s cubic-bezier(.4, 0, .2, 1) 1s both;
+  pointer-events: none;
+}
+
+@keyframes splash-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.06); }
+}
+
+/* The scrim starts clear so the photo is seen at full strength, then comes up
+   underneath the splash as it fades. */
+.intro::after { animation: scrim-in .7s ease 1s both; }
+
+@keyframes scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Controls wait out the splash, then rise slightly into place. */
+.intro .wrap {
+  animation: content-in .55s cubic-bezier(.2, .7, .3, 1) 1.15s both;
+}
+
+@keyframes content-in {
+  from { opacity: 0; transform: translateY(1.25rem); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ---------- status ---------- */
 
 .status {
@@ -203,6 +242,10 @@ body::after {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  /* Skip the intro entirely: no splash, controls visible immediately. */
+  .splash { display: none; }
+  .intro .wrap { opacity: 1; transform: none; }
+  .intro::after { opacity: 1; }
 }
 
 /* No light-mode override: the background photo sits under a dark scrim, so the

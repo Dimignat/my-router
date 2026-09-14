@@ -133,7 +133,9 @@ Then open **http://router.lan** (or `http://router`).
 **How the split works.** uhttpd has no virtual hosts, so `/www/cgi-bin/index-router`
 is registered as its 404 handler (`uhttpd.main.error_page`) and branches on
 `HTTP_HOST`: the friendly names get the GUI, everything else is redirected to
-LuCI. Two settings this depends on:
+LuCI. It serves the page **only for `/`** and returns a real 404 for any other
+missing path — without that guard a missing asset comes back as the GUI's HTML
+with `200 OK`, which masks genuine breakage. Two settings this depends on:
 
 - `uhttpd.main.no_dirlists='1'` — without it uhttpd answers `/` with a
   directory listing and the handler never runs.
@@ -165,6 +167,15 @@ targets, and a status lamp that always pairs colour with words.
 
 The footer shows the running node and the installed commit (`Версия fdb1cc7`),
 so you can tell at a glance which version a device is on without SSH.
+
+### The intro
+
+On load the photo is shown full-bleed for **1 s**, then fades over 0.7 s while
+the scrim comes up under it; the controls rise into place at 1.15 s. It is a
+CSS animation on `.splash` — deliberately not JS — so a script failure can
+never leave a user staring at a photo they cannot dismiss. `app.js` only tidies
+up afterwards (removes the node, allows a tap to skip). Users who set
+*reduce motion* skip the intro entirely.
 
 ### Changing the background
 
