@@ -12,7 +12,7 @@ var JOB_TIMEOUT_MS = 90000;
 var el = function (id) { return document.getElementById(id); };
 var lamp = el('lamp'), headline = el('headline'), sub = el('sub');
 var overlay = el('overlay'), overlayText = el('overlay-text');
-var toast = el('toast'), footNode = el('foot-node');
+var toast = el('toast'), footNode = el('foot-node'), footVersion = el('foot-version');
 var busy = false, statusTimer = null, toastTimer = null;
 
 /* ---------- helpers ---------- */
@@ -67,6 +67,12 @@ function paint(s) {
   footNode.textContent = s && s.node && s.node !== 'unknown'
     ? 'Сервер: ' + String(s.node).replace(/^redshield-/, '').replace(/-out$/, '')
     : (settling ? 'Выбираем сервер…' : '—');
+
+  if (footVersion) {
+    footVersion.textContent = s && s.version && s.version !== 'unknown'
+      ? 'Версия ' + String(s.version).slice(0, 7)
+      : 'Версия не установлена';
+  }
 }
 
 function refresh() {
@@ -146,7 +152,49 @@ el('btn-reload').addEventListener('click', function () {
 });
 
 el('btn-update').addEventListener('click', function () {
-  run('update', 'Обновляем программу…', 'Программа обновлена.', 2000);
+  if (busy) return;
+  busy = true;
+  setButtons(true);
+  clearTimeout(statusTimer);
+
+  overlayText.textContent = 'Проверяем обновления…';
+  overlay.hidden = false;
+  lamp.className = 'lamp is-busy';
+
+  var before = null;
+  api('status')
+    .then(function (s) { before = s && s.version; })
+    .then(function () { return api('update'); })
+    .then(function (r) {
+      if (!r.ok || !r.job) throw new Error(r.error || 'no job');
+      return waitForJob(r.job, Date.now());
+    })
+    .then(function () {
+      busy = false;
+      overlay.hidden = true;
+      return api('status');
+    })
+    .then(function (s) {
+      paint(s);
+      // Distinguish "updated" from "already current" — otherwise the user
+      // taps again wondering whether anything happened.
+      if (s && s.version && s.version !== before && before !== null) {
+        showToast('Обновлено! Установлена новая версия.', 'ok');
+      } else {
+        showToast('У вас уже последняя версия.', 'ok');
+      }
+    })
+    .catch(function () {
+      busy = false;
+      overlay.hidden = true;
+      // The usual cause is no internet, so say that rather than something vague.
+      showToast('Не удалось проверить обновления. Нет связи с интернетом?', 'bad');
+      return refresh();
+    })
+    .then(function () {
+      setButtons(false);
+      scheduleRefresh();
+    });
 });
 
 /* ---------- start ---------- */

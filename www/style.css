@@ -113,17 +113,17 @@ body {
 /* ---------- footer ---------- */
 
 .foot {
-  margin: 1.5rem 0 0;
+  margin: 1.25rem 0 0;
   display: flex; align-items: center; justify-content: space-between;
   gap: 1rem;
   font-size: .8125rem; color: var(--muted);
 }
-.link {
-  background: none; border: 0; padding: .35rem .1rem;
-  color: var(--muted); font: inherit; text-decoration: underline;
-  text-underline-offset: 3px; cursor: pointer;
-}
-.link:active { color: var(--text); }
+
+/* The update button is the least-used action, so it is quieter than the
+   other two without being hard to hit. */
+#btn-update { min-height: 4.5rem; background: transparent; }
+#btn-update .btn-title { font-size: 1.125rem; font-weight: 600; }
+#btn-update:active { background: var(--card); }
 
 /* ---------- overlay ---------- */
 
