@@ -1,0 +1,26 @@
+#!/bin/sh
+# Root dispatcher for uhttpd, which has no virtual-host support.
+#
+# Reached only for "/" (uhttpd serves real files itself). If the request came
+# in on the friendly hostname, serve the kiosk GUI inline; otherwise fall
+# through to LuCI so the IP keeps working for administration.
+
+APP=/www/app/index.html
+HOST=$(echo "${HTTP_HOST:-}" | tr 'A-Z' 'a-z' | cut -d: -f1)
+
+case "$HOST" in
+    router.lan|router)
+        if [ -r "$APP" ]; then
+            printf 'Content-Type: text/html; charset=utf-8\r\n'
+            printf 'Cache-Control: no-cache\r\n\r\n'
+            # Rewrite relative asset paths so the page works from "/".
+            sed -e 's|href="style.css"|href="/app/style.css"|' \
+                -e 's|src="app.js"|src="/app/app.js"|' "$APP"
+            exit 0
+        fi
+        ;;
+esac
+
+# Anything else: hand over to LuCI.
+printf 'Status: 302 Found\r\n'
+printf 'Location: /cgi-bin/luci/\r\n\r\n'

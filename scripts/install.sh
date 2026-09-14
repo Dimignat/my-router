@@ -65,11 +65,65 @@ else
     log "update cron already present"
 fi
 
+# --- friendly hostname ----------------------------------------------------
+# Users get http://router.lan instead of an IP address. dnsmasq is already
+# authoritative for .lan, so no rebind-protection exception is needed.
+HOSTNAME_LOCAL="${MY_ROUTER_HOSTNAME:-router.lan}"
+LAN_IP=$(uci -q get network.lan.ipaddr || echo 192.168.2.1)
+
+dns_changed=0
+# Register both the FQDN and the bare short name: phones that append a search
+# domain send one, browsers that don't send the other.
+for name in "$HOSTNAME_LOCAL" "${HOSTNAME_LOCAL%%.*}"; do
+    if ! uci -q show dhcp | grep -q "\.name='$name'"; then
+        log "registering $name -> $LAN_IP"
+        uci add dhcp domain >/dev/null
+        uci set dhcp.@domain[-1].name="$name"
+        uci set dhcp.@domain[-1].ip="$LAN_IP"
+        dns_changed=1
+    fi
+done
+if [ "$dns_changed" = "1" ]; then
+    uci commit dhcp
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1
+else
+    log "$HOSTNAME_LOCAL already registered"
+fi
+
+# --- root dispatcher ------------------------------------------------------
+# uhttpd has no vhosts, so the 404 handler decides what "/" serves based on
+# the Host header: the GUI on the friendly name, LuCI on the IP.
+log "installing root dispatcher"
+cp "$SRC/cgi-bin/index-router" /www/cgi-bin/index-router.new
+chmod +x /www/cgi-bin/index-router.new
+mv /www/cgi-bin/index-router.new /www/cgi-bin/index-router
+
+# /www/index.html would shadow the handler, so move it aside once.
+if [ -f /www/index.html ] && [ ! -f /www/index.html.orig ]; then
+    mv /www/index.html /www/index.html.orig
+    log "moved stock /www/index.html aside (kept as index.html.orig)"
+fi
+
+uhttpd_changed=0
+if [ "$(uci -q get uhttpd.main.error_page)" != "/cgi-bin/index-router" ]; then
+    uci set uhttpd.main.error_page='/cgi-bin/index-router'
+    uhttpd_changed=1
+    log "set uhttpd error_page handler"
+fi
+# Without this, uhttpd answers "/" with a directory listing and the handler
+# above never runs.
+if [ "$(uci -q get uhttpd.main.no_dirlists)" != "1" ]; then
+    uci set uhttpd.main.no_dirlists='1'
+    uhttpd_changed=1
+    log "disabled directory listings"
+fi
+[ "$uhttpd_changed" = "1" ] && uci commit uhttpd
+
 # --- uhttpd ---------------------------------------------------------------
 # The kiosk UI lives at /app/ and the API at /cgi-bin/router-api; both are
 # served by the stock uhttpd instance, so no extra daemon is needed.
-/etc/init.d/uhttpd reload >/dev/null 2>&1 || /etc/init.d/uhttpd restart >/dev/null 2>&1
+/etc/init.d/uhttpd restart >/dev/null 2>&1
 
 if [ "$FROM_UPDATE" = "0" ]; then
-    log "installed. Open http://192.168.2.1/app/ from the LAN."
+    log "installed. Open http://$HOSTNAME_LOCAL from the LAN."
 fi

@@ -103,6 +103,7 @@ netshift list_update         # refresh domain lists (also runs daily at 09:13 vi
 |---|---|---|
 | `www/` | `/www/app/` | Kiosk GUI, served by stock uhttpd |
 | `cgi-bin/router-api` | `/www/cgi-bin/router-api` | JSON control API (CGI) |
+| `cgi-bin/index-router` | `/www/cgi-bin/index-router` | Root dispatcher: GUI on the friendly name, LuCI otherwise |
 | `scripts/my-router-update` | `/usr/bin/my-router-update` | Pulls master, applies it |
 | `scripts/install.sh` | — | Installer; also used by the updater |
 | `config/settings.conf` | `/etc/my-router/settings.conf` | Repo/branch; seeded once, never overwritten |
@@ -118,13 +119,40 @@ tar czf - www cgi-bin scripts config \
                           && sh /tmp/mr/scripts/install.sh'
 ```
 
-Then open **http://192.168.2.1/app/**.
+Then open **http://router.lan** (or `http://router`).
+
+### URLs
+
+| URL | Serves |
+|---|---|
+| `http://router.lan`, `http://router` | Kiosk GUI (what users get) |
+| `http://192.168.2.1/app/` | Same GUI, by IP |
+| `http://192.168.2.1` | Redirects to LuCI, for administration |
+
+**How the split works.** uhttpd has no virtual hosts, so `/www/cgi-bin/index-router`
+is registered as its 404 handler (`uhttpd.main.error_page`) and branches on
+`HTTP_HOST`: the friendly names get the GUI, everything else is redirected to
+LuCI. Two settings this depends on:
+
+- `uhttpd.main.no_dirlists='1'` — without it uhttpd answers `/` with a
+  directory listing and the handler never runs.
+- `/www/index.html` is moved to `/www/index.html.orig` — a real file at `/`
+  would shadow the handler.
+
+dnsmasq resolves both names via `dhcp.@domain[]` entries. It is already
+authoritative for `.lan`, so rebind protection does not interfere. Note DNS on
+this router is chained through sing-box (`noresolv=1`, `server=127.0.0.42`);
+the `@domain` entries are answered by dnsmasq itself and are unaffected.
+
+LuCI answers unauthenticated requests with **HTTP 403 and a login page** — that
+is normal, not a fault of this setup.
 
 ---
 
 ## 4. The GUI
 
-Aimed at users who are not confident with computers, so: three actions, plain
+Reachable at **http://router.lan** (no path, no IP). Aimed at users who are
+not confident with computers, so: three actions, plain
 Russian, no jargon ("VPN", "proxy", "sing-box" appear nowhere), ~84px touch
 targets, and a status lamp that always pairs colour with words.
 
@@ -221,6 +249,9 @@ credentials on the device via UCI — never in this repo.
 | Symptom | Check |
 |---|---|
 | GUI unreachable | `/etc/init.d/uhttpd restart`; is `/www/app/index.html` there? |
+| `router.lan` doesn't resolve | Client must use the router for DNS. Check `uci show dhcp \| grep @domain`, then `nslookup router.lan 192.168.2.1`. Phones with private/secure DNS enabled bypass it — use the IP there. |
+| `router.lan` shows a file listing | `uci set uhttpd.main.no_dirlists=1; uci commit uhttpd; /etc/init.d/uhttpd restart` |
+| `router.lan` shows LuCI | `/www/index.html` is shadowing the handler, or `error_page` is unset — re-run the installer |
 | Buttons do nothing | `logread -e router-api`; run the CGI by hand: `QUERY_STRING='action=status' /www/cgi-bin/router-api` |
 | "Нет соединения" persists | `netshift check_proxy`, then `netshift clash_api get_group_latency redshield-urltest-out` — if every node is `0`/absent, the WAN or all nodes are down |
 | Node shows "unknown" | Normal for ~15 s after a restart (`settling:1`) |
