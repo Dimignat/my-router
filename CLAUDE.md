@@ -204,6 +204,13 @@ Every router runs `*/15 * * * * /usr/bin/my-router-update`. Each run:
 
 1. `GET api.github.com/repos/<repo>/commits/master` with
    `Accept: application/vnd.github.sha` → remote SHA.
+   **The URL carries a unique `?cb=` parameter.** That endpoint sends
+   `cache-control: public, max-age=60`, so without it the CDN serves the
+   previous commit for up to a minute after a push and the router decides it
+   is already current — the update then appears to work only on a second
+   attempt. A fresh cache key is the only reliable fix here; `Cache-Control:
+   no-cache` request headers and the `git/refs` endpoint are both still served
+   from the same cache. Don't remove it.
 2. Compares to `/etc/my-router/version`; exits if equal.
 3. Downloads `codeload.github.com/<repo>/tar.gz/<sha>`, extracts to `/tmp`.
 4. **Sanity-checks the tree** (`www/` and `cgi-bin/router-api` must exist).
@@ -256,5 +263,6 @@ credentials on the device via UCI — never in this repo.
 | "Нет соединения" persists | `netshift check_proxy`, then `netshift clash_api get_group_latency redshield-urltest-out` — if every node is `0`/absent, the WAN or all nodes are down |
 | Node shows "unknown" | Normal for ~15 s after a restart (`settling:1`) |
 | Update not applying | `logread -e my-router-update`; `cat /etc/my-router/version`; stale lock: `rmdir /var/lock/my-router-update.lock` |
+| Update says "already current" right after a push | The `?cb=` cache-buster is missing from the SHA request — see step 1 above |
 | Router full | `df -h /overlay` — 149 MB free; job logs live in `/tmp` (tmpfs, cleared on reboot) |
 
