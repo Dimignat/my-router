@@ -9,20 +9,28 @@ PROXY_GROUP=redshield-out
 URLTEST_GROUP=redshield-urltest-out
 mkdir -p "$JOB_DIR" "$STATE_DIR"
 
+# Job records live in tmpfs (RAM) and nothing else removes them, so prune
+# anything older than an hour on each call. Cheap, and keeps a long-running
+# router from slowly filling memory with old logs.
+# BusyBox find has no -delete, so use -exec rm.
+find "$JOB_DIR" -type f -mmin +60 -exec rm -f {} \; 2>/dev/null
+
 printf 'Content-Type: application/json; charset=utf-8\r\n'
 printf 'Cache-Control: no-store\r\n\r\n'
 
 # Parse QUERY_STRING into action/job (no eval: query data is untrusted).
-action=''; job=''
+action=''; job=''; node=''
 for pair in $(echo "${QUERY_STRING:-}" | tr '&' ' '); do
     case "$pair" in
         action=*) action=${pair#action=} ;;
         job=*)    job=${pair#job=} ;;
+        node=*)   node=${pair#node=} ;;
     esac
 done
 # Whitelist: strip anything that is not an allowed character.
 action=$(echo "$action" | tr -cd 'a-z_')
 job=$(echo "$job" | tr -cd 'a-zA-Z0-9_-')
+node=$(echo "$node" | tr -cd 'a-z0-9-')
 
 json_err() { printf '{"ok":false,"error":"%s"}\n' "$1"; exit 0; }
 
@@ -47,6 +55,78 @@ do_reconnect() {
 # Reload: restart the VPN service only. Wi-Fi and LAN stay up.
 do_reload() { /etc/init.d/netshift restart; }
 
+# Country labels for the proxy nodes. Derived from each outbound's hostname
+# prefix, with the two we could confirm by exit IP (Stockholm, Warsaw) checked
+# against a real request. If nodes are added or reordered in UCI, update this.
+node_country() {
+    case "$1" in
+        *-1-out) echo "Швеция|Стокгольм|SE" ;;
+        *-2-out) echo "Польша|Варшава|PL" ;;
+        *-3-out) echo "Финляндия|Хельсинки|FI" ;;
+        *-4-out) echo "Германия|Франкфурт|DE" ;;
+        *-5-out) echo "Швейцария|Цюрих|CH" ;;
+        *-6-out) echo "Нидерланды|Амстердам|NL" ;;
+        *-7-out) echo "Литва|Вильнюс|LT" ;;
+        *-8-out) echo "Латвия|Рига|LV" ;;
+        *-9-out) echo "Австрия|Вена|AT" ;;
+        *)       echo "||" ;;
+    esac
+}
+
+# List every node with its country and last known latency, so the GUI can offer
+# a manual choice when a site is blocked in one country but not another.
+emit_servers() {
+    proxies=$(/usr/bin/netshift clash_api get_proxies 2>/dev/null)
+    current=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$URLTEST_GROUP\"].now" 2>/dev/null)
+    selected=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$PROXY_GROUP\"].now" 2>/dev/null)
+
+    # auto = the selector is delegating to the urltest group. When it is not,
+    # the live node is whatever the selector points at, not the urltest pick.
+    auto=0
+    if [ "$selected" = "$URLTEST_GROUP" ]; then
+        auto=1
+    else
+        current="$selected"
+    fi
+
+    printf '{"ok":true,"auto":%s,"current":"%s","servers":[' "$auto" "${current:-unknown}"
+
+    first=1
+    for n in 1 2 3 4 5 6 7 8 9; do
+        tag="redshield-$n-out"
+        # Skip nodes that do not exist in this config.
+        echo "$proxies" | grep -q "\"$tag\"" || continue
+
+        info=$(node_country "$tag")
+        country=$(echo "$info" | cut -d"|" -f1)
+        city=$(echo "$info" | cut -d"|" -f2)
+        code=$(echo "$info" | cut -d"|" -f3)
+        delay=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$tag\"].history[-1].delay" 2>/dev/null)
+
+        [ "$first" = "1" ] || printf ','
+        first=0
+        printf '{"tag":"%s","country":"%s","city":"%s","code":"%s","latency":%s,"active":%s}' \
+            "$tag" "$country" "$city" "$code" "${delay:-null}" \
+            "$([ "$tag" = "$current" ] && echo true || echo false)"
+    done
+    printf ']}\n'
+}
+
+# Switch to a specific node, or back to automatic selection.
+do_select() {
+    if [ "$1" = "auto" ]; then
+        /usr/bin/netshift clash_api set_group_proxy "$PROXY_GROUP" "$URLTEST_GROUP"
+        # Re-test so the automatic pick is based on fresh numbers.
+        /usr/bin/netshift clash_api get_group_latency "$URLTEST_GROUP"
+    else
+        /usr/bin/netshift clash_api set_group_proxy "$PROXY_GROUP" "$1"
+    fi
+}
+
+# Reboot: full device restart. Detached with a delay so this CGI can return
+# its job id before the network goes away.
+do_reboot() { (sleep 2; /sbin/reboot) >/dev/null 2>&1 & echo "rebooting"; }
+
 # Update: pull the latest master from GitHub and apply it.
 # No --force: that would re-download and reinstall on every click even when
 # nothing changed. The updater already applies whatever differs from the
@@ -61,8 +141,14 @@ emit_status() {
 
     # Which node is actually carrying traffic right now, and its last latency.
     proxies=$(/usr/bin/netshift clash_api get_proxies 2>/dev/null)
-    now=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$URLTEST_GROUP\"].now" 2>/dev/null)
-    [ -z "$now" ] && now=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$PROXY_GROUP\"].now" 2>/dev/null)
+    # If the user pinned a country, that is the live node; otherwise the
+    # urltest group's current pick is.
+    sel=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$PROXY_GROUP\"].now" 2>/dev/null)
+    if [ -n "$sel" ] && [ "$sel" != "$URLTEST_GROUP" ]; then
+        now="$sel"
+    else
+        now=$(echo "$proxies" | jsonfilter -e "@.proxies[\"$URLTEST_GROUP\"].now" 2>/dev/null)
+    fi
     delay=''
     [ -n "$now" ] && delay=$(echo "$proxies" | jsonfilter \
         -e "@.proxies[\"$now\"].history[-1].delay" 2>/dev/null)
@@ -84,11 +170,30 @@ emit_status() {
     settling=0
     [ "$enabled" = "1" ] && [ -z "$now" ] && settling=1
 
+    # When something is wrong, say WHICH thing: the three causes need three
+    # different actions from the user, and "no connection" covers all of them.
+    #   wan   - no uplink at all (cable out, hotel wifi not joined)
+    #   nodes - uplink is fine but no proxy node is reachable
+    #   off   - the tunnel is not running
+    reason=""
+    if [ "$enabled" != "1" ]; then
+        reason="off"
+    elif [ "$online" != "1" ] && [ "$settling" != "1" ]; then
+        # Is the uplink itself up? Check the WAN gateway, which needs no DNS
+        # and does not traverse the tunnel.
+        gw=$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}')
+        if [ -n "$gw" ] && ping -c1 -W2 "$gw" >/dev/null 2>&1; then
+            reason="nodes"
+        else
+            reason="wan"
+        fi
+    fi
+
     ver=$(cat /etc/my-router/version 2>/dev/null || echo unknown)
     up=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
 
-    printf '{"ok":true,"vpn_enabled":%s,"online":%s,"settling":%s,"node":"%s","latency":%s,"version":"%s","uptime":%s}\n' \
-        "$enabled" "$online" "$settling" "${now:-unknown}" "${delay:-null}" "$ver" "$up"
+    printf '{"ok":true,"vpn_enabled":%s,"online":%s,"settling":%s,"reason":"%s","node":"%s","latency":%s,"version":"%s","uptime":%s}\n' \
+        "$enabled" "$online" "$settling" "$reason" "${now:-unknown}" "${delay:-null}" "$ver" "$up"
 }
 
 # --- dispatch ------------------------------------------------------------
@@ -98,6 +203,17 @@ case "$action" in
     reconnect) spawn_job do_reconnect ;;
     reload)    spawn_job do_reload ;;
     update)    spawn_job do_update ;;
+    reboot)    spawn_job do_reboot ;;
+    servers)   emit_servers ;;
+    select)
+        # Only accept "auto" or a real redshield-N-out tag: this value comes
+        # from the query string and is passed to the Clash API.
+        case "$node" in
+            auto) spawn_job do_select auto ;;
+            redshield-[1-9]-out) spawn_job do_select "$node" ;;
+            *) json_err "invalid node" ;;
+        esac
+        ;;
     job_status)
         [ -z "$job" ] && json_err "missing job id"
         [ -f "$JOB_DIR/$job.log" ] || json_err "unknown job"

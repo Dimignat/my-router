@@ -63,6 +63,33 @@
         <span class="btn-note" id="update-note">Загрузить последнюю версию программы</span>
       </span>
     </button>
+
+    <button class="btn" id="btn-country" type="button">
+      <span class="btn-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><path d="M3 12h18"/>
+          <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>
+        </svg>
+      </span>
+      <span class="btn-text">
+        <span class="btn-title">Выбрать страну</span>
+        <span class="btn-note" id="country-note">Если сайт не открывается — попробуйте другую</span>
+      </span>
+    </button>
+
+    <button class="btn btn-danger" id="btn-reboot" type="button">
+      <span class="btn-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5.5 5.5a9 9 0 1 0 13 0"/><path d="M12 2v9"/>
+        </svg>
+      </span>
+      <span class="btn-text">
+        <span class="btn-title">Перезагрузить роутер</span>
+        <span class="btn-note">Крайняя мера. Интернет пропадёт на 2 минуты</span>
+      </span>
+    </button>
   </section>
 
   <p class="foot">
@@ -78,6 +105,31 @@
     <div class="spinner" aria-hidden="true"></div>
     <p class="overlay-text" id="overlay-text">Переподключаемся…</p>
     <p class="overlay-note">Это займёт несколько секунд.<br>Не выключайте роутер.</p>
+  </div>
+</div>
+
+<!-- Country picker -->
+<div class="overlay" id="countries" hidden>
+  <div class="overlay-card sheet">
+    <p class="sheet-title">Выберите страну</p>
+    <p class="sheet-note">Сайт заблокирован в одной стране — попробуйте другую.</p>
+    <div class="sheet-list" id="country-list"></div>
+    <button class="btn sheet-close" id="country-close" type="button">Закрыть</button>
+  </div>
+</div>
+
+<!-- Reboot confirmation: this one kicks everybody off, so it is not one tap. -->
+<div class="overlay" id="confirm" hidden>
+  <div class="overlay-card confirm-card">
+    <p class="confirm-title">Перезагрузить роутер?</p>
+    <p class="overlay-note">
+      Интернет и Wi-Fi пропадут примерно на 2 минуты.<br>
+      Роутер включится сам.
+    </p>
+    <div class="confirm-actions">
+      <button class="btn btn-danger confirm-yes" id="confirm-yes" type="button">Да, перезагрузить</button>
+      <button class="btn confirm-no" id="confirm-no" type="button">Отмена</button>
+    </div>
   </div>
 </div>
 

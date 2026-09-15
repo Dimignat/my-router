@@ -34,7 +34,7 @@ function showToast(msg, kind) {
 }
 
 function setButtons(disabled) {
-  ['btn-reconnect', 'btn-reload', 'btn-update'].forEach(function (id) {
+  ['btn-reconnect', 'btn-reload', 'btn-update', 'btn-reboot', 'btn-country'].forEach(function (id) {
     el(id).disabled = disabled;
   });
 }
@@ -56,6 +56,17 @@ function paint(s) {
     // Right after a restart the tunnel is up but no node is chosen yet.
     headline.textContent = 'Подключаемся…';
     sub.textContent = 'Подождите несколько секунд';
+  } else if (s && s.reason === 'wan') {
+    // No uplink at all: no button on this page can fix that.
+    headline.textContent = 'Нет интернета';
+    sub.textContent = 'Проверьте кабель или подключение к сети';
+  } else if (s && s.reason === 'nodes') {
+    // Uplink is fine, the proxy servers are the problem.
+    headline.textContent = 'Серверы недоступны';
+    sub.textContent = 'Нажмите «Переподключиться»';
+  } else if (s && s.reason === 'off') {
+    headline.textContent = 'Защита выключена';
+    sub.textContent = 'Нажмите «Перезапустить»';
   } else if (partial) {
     headline.textContent = 'Нет соединения';
     sub.textContent = 'Нажмите «Переподключиться»';
@@ -105,7 +116,7 @@ function waitForJob(id, started) {
   });
 }
 
-function run(action, busyText, okText, settleMs) {
+function run(action, busyText, okText, settleMs, extra) {
   if (busy) return;
   busy = true;
   setButtons(true);
@@ -115,7 +126,7 @@ function run(action, busyText, okText, settleMs) {
   overlay.hidden = false;
   lamp.className = 'lamp is-busy';
 
-  api(action)
+  api(action, extra)
     .then(function (r) {
       if (!r.ok || !r.job) throw new Error(r.error || 'no job');
       return waitForJob(r.job, Date.now());
@@ -195,6 +206,138 @@ el('btn-update').addEventListener('click', function () {
       setButtons(false);
       scheduleRefresh();
     });
+});
+
+/* ---------- country picker ---------- */
+
+// Flags come from the ISO code, so no image assets are needed.
+function flagOf(code) {
+  if (!code || code.length !== 2) return '\uD83C\uDF10';           // globe
+  return String.fromCodePoint.apply(null, code.toUpperCase().split('')
+    .map(function (c) { return 0x1F1E6 + c.charCodeAt(0) - 65; }));
+}
+
+function renderCountries(data) {
+  var list = el('country-list');
+  list.textContent = '';
+
+  var auto = document.createElement('button');
+  auto.type = 'button';
+  auto.className = 'country country-auto' + (data.auto ? ' is-active' : '');
+  auto.innerHTML =
+    '<span class="country-flag" aria-hidden="true">\u2728</span>' +
+    '<span class="country-text">' +
+      '<span class="country-name">Автоматически</span>' +
+      '<span class="country-city">Самый быстрый сервер</span>' +
+    '</span>' +
+    '<span class="country-state">' + (data.auto ? 'Сейчас' : '') + '</span>';
+  auto.addEventListener('click', function () { pickCountry('auto'); });
+  list.appendChild(auto);
+
+  (data.servers || []).forEach(function (sv) {
+    var down = sv.latency === null || sv.latency === undefined;
+    // Only call it "current" when not in auto mode, or the user sees two rows
+    // both claiming to be active.
+    var isCurrent = sv.active && !data.auto;
+
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'country' + (isCurrent ? ' is-active' : '') + (down ? ' is-down' : '');
+
+    var state = isCurrent ? 'Сейчас'
+              : down ? 'Недоступен'
+              : sv.latency + ' мс';
+
+    b.innerHTML =
+      '<span class="country-flag" aria-hidden="true">' + flagOf(sv.code) + '</span>' +
+      '<span class="country-text">' +
+        '<span class="country-name"></span>' +
+        '<span class="country-city"></span>' +
+      '</span>' +
+      '<span class="country-state"></span>';
+    // Set text via textContent so server-supplied strings are never parsed.
+    b.querySelector('.country-name').textContent = sv.country || sv.tag;
+    b.querySelector('.country-city').textContent = sv.city || '';
+    b.querySelector('.country-state').textContent = state;
+
+    b.addEventListener('click', function () { pickCountry(sv.tag); });
+    list.appendChild(b);
+  });
+}
+
+function openCountries() {
+  if (busy) return;
+  var list = el('country-list');
+  list.textContent = '';
+  var loading = document.createElement('p');
+  loading.className = 'sheet-note';
+  loading.textContent = 'Загружаем список…';
+  list.appendChild(loading);
+  el('countries').hidden = false;
+
+  api('servers')
+    .then(renderCountries)
+    .catch(function () {
+      list.textContent = '';
+      var err = document.createElement('p');
+      err.className = 'sheet-note';
+      err.textContent = 'Не удалось загрузить список.';
+      list.appendChild(err);
+    });
+}
+
+function pickCountry(tag) {
+  el('countries').hidden = true;
+  var label = tag === 'auto' ? 'Выбираем лучший сервер…' : 'Переключаем страну…';
+  var okMsg = tag === 'auto' ? 'Готово! Сервер выбирается автоматически.'
+                             : 'Готово! Страна изменена.';
+  run('select', label, okMsg, 3000, '&node=' + encodeURIComponent(tag));
+}
+
+el('btn-country').addEventListener('click', openCountries);
+el('country-close').addEventListener('click', function () {
+  el('countries').hidden = true;
+});
+
+el('btn-reboot').addEventListener('click', function () {
+  if (busy) return;
+  el('confirm').hidden = false;
+});
+
+el('confirm-no').addEventListener('click', function () {
+  el('confirm').hidden = true;
+});
+
+el('confirm-yes').addEventListener('click', function () {
+  el('confirm').hidden = true;
+  if (busy) return;
+  busy = true;
+  setButtons(true);
+  clearTimeout(statusTimer);
+
+  overlayText.textContent = 'Перезагружаем роутер…';
+  overlay.hidden = false;
+  lamp.className = 'lamp is-busy';
+
+  // The router goes away mid-request, so a failed fetch here is expected and
+  // must not be reported as an error.
+  api('reboot').catch(function () {});
+
+  // Poll until the router answers again, then reload to a clean page.
+  var deadline = Date.now() + 180000;
+  (function waitForBack() {
+    setTimeout(function () {
+      fetch(API + '?action=status', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? location.reload() : Promise.reject(); })
+        .catch(function () {
+          if (Date.now() < deadline) return waitForBack();
+          busy = false;
+          overlay.hidden = true;
+          setButtons(false);
+          showToast('Роутер долго не отвечает. Обновите страницу.', 'bad');
+        });
+    }, 5000);
+  })();
 });
 
 /* ---------- intro ---------- */

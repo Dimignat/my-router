@@ -70,6 +70,14 @@ if [ "$current" = "$remote" ] && [ "$FORCE" = "0" ]; then
     exit 0
 fi
 
+# A commit that already failed its health check is not retried every 15
+# minutes; --force overrides, so a fixed release can be pulled deliberately.
+if [ "$FORCE" = "0" ] && [ -f "$STATE_DIR/bad-version" ] &&
+   [ "$(cat "$STATE_DIR/bad-version")" = "$remote" ]; then
+    log "$remote previously failed its health check; skipping (use --force to retry)"
+    exit 0
+fi
+
 log "downloading $REPO@$remote"
 if ! curl -fsSL --max-time 120 \
         "https://codeload.github.com/$REPO/tar.gz/$remote" \
@@ -86,23 +94,93 @@ fi
 SRC=$(find "$WORK" -maxdepth 1 -type d -name "*-$remote*" | head -1)
 [ -z "$SRC" ] && SRC=$(find "$WORK" -maxdepth 1 -mindepth 1 -type d ! -name '*.tar.gz' | head -1)
 
-if [ ! -d "$SRC/www" ] || [ ! -f "$SRC/cgi-bin/router-api" ]; then
+# Structural check on the downloaded tree. Existence alone is not enough --
+# an empty index.html would sail through -- so also require the page to carry
+# the markup the GUI depends on.
+if [ ! -d "$SRC/www" ] || [ ! -f "$SRC/cgi-bin/router-api" ] ||
+   [ ! -x "$SRC/scripts/install.sh" ]; then
     log "downloaded tree is missing expected files; aborting without changes"
     exit 1
 fi
+if ! grep -q 'id="btn-reconnect"' "$SRC/www/index.html" 2>/dev/null; then
+    log "downloaded index.html does not look like the GUI; aborting without changes"
+    exit 1
+fi
+
+# Snapshot what is live now, so a bad release can be undone on the device
+# without anyone having to SSH in.
+SNAP="$STATE_DIR/rollback"
+rm -rf "$SNAP.new"
+mkdir -p "$SNAP.new"
+[ -d /www/app ] && cp -r /www/app "$SNAP.new/app"
+[ -f /www/cgi-bin/router-api ] && cp /www/cgi-bin/router-api "$SNAP.new/router-api"
+[ -f /www/cgi-bin/index-router ] && cp /www/cgi-bin/index-router "$SNAP.new/index-router"
+[ -f /usr/bin/my-router-update ] && cp /usr/bin/my-router-update "$SNAP.new/my-router-update"
+cp "$STATE_DIR/version" "$SNAP.new/version" 2>/dev/null || echo "" > "$SNAP.new/version"
+rm -rf "$SNAP"
+mv "$SNAP.new" "$SNAP"
+
+# Put the live files back the way they were before this run.
+restore_snapshot() {
+    [ -d "$SNAP/app" ] || return 1
+    rm -rf /www/app.failed
+    [ -d /www/app ] && mv /www/app /www/app.failed
+    cp -r "$SNAP/app" /www/app
+    [ -f "$SNAP/router-api" ]  && cp "$SNAP/router-api"  /www/cgi-bin/router-api
+    [ -f "$SNAP/index-router" ] && cp "$SNAP/index-router" /www/cgi-bin/index-router
+    [ -f "$SNAP/my-router-update" ] && cp "$SNAP/my-router-update" /usr/bin/my-router-update
+    chmod +x /www/cgi-bin/router-api /www/cgi-bin/index-router /usr/bin/my-router-update 2>/dev/null
+    cp "$SNAP/version" "$STATE_DIR/version" 2>/dev/null
+    /etc/init.d/uhttpd restart >/dev/null 2>&1
+    return 0
+}
+
+# Does the GUI actually work? Checked over real HTTP against the live server,
+# so a broken CGI, a missing asset or an unparseable page is caught.
+health_ok() {
+    local base="http://127.0.0.1"
+    # The control API must answer with JSON that reports success.
+    curl -fsS --max-time 20 "$base/cgi-bin/router-api?action=status" 2>/dev/null \
+        | grep -q '"ok":true' || return 1
+    # The page itself must be served and carry its buttons.
+    curl -fsS --max-time 15 "$base/app/" 2>/dev/null \
+        | grep -q 'id="btn-reconnect"' || return 1
+    # Stylesheet and script must be fetchable (catches a half-copied tree).
+    curl -fsS --max-time 15 -o /dev/null "$base/app/style.css" 2>/dev/null || return 1
+    curl -fsS --max-time 15 -o /dev/null "$base/app/app.js" 2>/dev/null || return 1
+    return 0
+}
 
 # Hand off to the repo's own installer so update logic ships with the content.
-if [ -x "$SRC/scripts/install.sh" ]; then
-    log "running installer"
-    if ! sh "$SRC/scripts/install.sh" --from-update "$SRC"; then
-        log "installer failed; router left on previous version"
-        exit 1
+log "running installer"
+if ! sh "$SRC/scripts/install.sh" --from-update "$SRC"; then
+    log "installer failed; rolling back"
+    restore_snapshot && log "rolled back to previous version" ||
+        log "WARNING: no snapshot to roll back to"
+    exit 1
+fi
+
+# Give uhttpd a moment to pick the new files up before judging them.
+sleep 2
+
+if ! health_ok; then
+    log "health check FAILED after update to $remote; rolling back"
+    if restore_snapshot; then
+        sleep 2
+        if health_ok; then
+            log "rolled back successfully; staying on $(cat "$STATE_DIR/version" 2>/dev/null)"
+        else
+            log "WARNING: still unhealthy after rollback -- manual repair needed"
+        fi
+        # Record the bad commit so the next run does not reinstall it in a loop.
+        echo "$remote" > "$STATE_DIR/bad-version"
+    else
+        log "WARNING: no snapshot to roll back to"
     fi
-else
-    log "no installer in tree; aborting"
     exit 1
 fi
 
 echo "$remote" > "$STATE_DIR/version"
 date '+%Y-%m-%d %H:%M:%S' > "$STATE_DIR/last-update"
+rm -f "$STATE_DIR/bad-version"
 log "updated to $remote"

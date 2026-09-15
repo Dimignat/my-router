@@ -82,6 +82,36 @@ else
     log "update cron already present"
 fi
 
+# --- resilience -----------------------------------------------------------
+# The point of this GUI is that nobody technical is present, so the router
+# should recover on its own wherever it can.
+
+# Restart the tunnel automatically if it dies, instead of waiting for someone
+# to notice and press a button.
+if ! grep -q 'procd_set_param respawn' /etc/init.d/netshift 2>/dev/null; then
+    if sed -i 's|^\( *\)procd_set_param stdout 1|\1procd_set_param respawn 3600 5 0\n\1procd_set_param stdout 1|' \
+            /etc/init.d/netshift 2>/dev/null &&
+       grep -q 'procd_set_param respawn' /etc/init.d/netshift; then
+        log "enabled automatic restart for netshift"
+        NEEDS_NETSHIFT_RESTART=1
+    else
+        log "could not enable respawn (netshift init script differs); skipping"
+    fi
+fi
+
+# Reconnect by itself when the uplink comes back -- the normal case for a
+# travel router that moves between networks.
+if [ "$(uci -q get netshift.settings.enable_badwan_interface_monitoring)" != "1" ]; then
+    WAN_DEV=$(uci -q get network.wan.device || echo eth0)
+    uci set netshift.settings.enable_badwan_interface_monitoring='1'
+    uci set netshift.settings.badwan_monitored_interfaces="wan"
+    uci commit netshift
+    log "enabled WAN monitoring on wan ($WAN_DEV)"
+    NEEDS_NETSHIFT_RESTART=1
+fi
+
+[ "${NEEDS_NETSHIFT_RESTART:-0}" = "1" ] && /etc/init.d/netshift restart >/dev/null 2>&1
+
 # --- friendly hostname ----------------------------------------------------
 # Users get http://router.lan instead of an IP address. dnsmasq is already
 # authoritative for .lan, so no rebind-protection exception is needed.

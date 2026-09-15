@@ -181,6 +181,90 @@ body::after {
 
 .btn[disabled] { opacity: .5; pointer-events: none; }
 
+/* The reboot button is destructive, so it reads as a warning and sits last. */
+.btn-danger { border-color: rgba(239, 68, 68, .5); }
+.btn-danger .btn-icon { color: #f87171; }
+.btn-danger:active { background: rgba(69, 26, 26, .9); }
+
+#btn-reboot { min-height: 4.5rem; background: rgba(31, 21, 24, .6); }
+#btn-reboot .btn-title { font-size: 1.125rem; font-weight: 600; }
+
+/* ---------- country sheet ---------- */
+
+.sheet {
+  max-width: 24rem;
+  width: 100%;
+  max-height: 80dvh;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+.sheet-title { margin: 0 0 .25rem; font-size: 1.375rem; font-weight: 650; text-align: center; }
+.sheet-note {
+  margin: 0 0 1rem; color: var(--muted); font-size: .9375rem;
+  text-align: center; line-height: 1.4;
+}
+
+.sheet-list {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: grid;
+  gap: .5rem;
+  margin-bottom: 1rem;
+}
+
+/* One row per country. Big enough to hit, with the state on the right so the
+   eye can scan down a single column. */
+.country {
+  display: flex;
+  align-items: center;
+  gap: .875rem;
+  width: 100%;
+  min-height: 3.75rem;
+  padding: .75rem 1rem;
+  text-align: left;
+  color: var(--text);
+  background: rgba(21, 31, 51, .85);
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: .875rem;
+  font: inherit;
+  cursor: pointer;
+  transition: transform .12s ease, background .2s ease, border-color .2s ease;
+}
+.country:active { transform: scale(.98); background: rgba(28, 41, 66, .95); }
+.country:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.country-flag { font-size: 1.5rem; line-height: 1; flex: 0 0 auto; }
+.country-text { display: flex; flex-direction: column; gap: .1rem; min-width: 0; flex: 1; }
+.country-name { font-size: 1.0625rem; font-weight: 600; }
+.country-city { font-size: .8125rem; color: var(--muted); }
+
+.country-state { flex: 0 0 auto; font-size: .8125rem; color: var(--muted); text-align: right; }
+
+/* Currently routing through this one. */
+.country.is-active { border-color: var(--ok); background: rgba(20, 60, 40, .7); }
+.country.is-active .country-state { color: var(--ok); font-weight: 600; }
+
+/* Latency check failed: still selectable, but say so rather than hide it. */
+.country.is-down { opacity: .55; }
+.country.is-down .country-state { color: var(--bad); }
+
+/* "Automatic" sits at the top and is visually distinct from the countries. */
+.country-auto { background: rgba(37, 99, 235, .3); border-color: rgba(59, 130, 246, .5); }
+
+.sheet-close { min-height: 3.25rem; justify-content: center; text-align: center; }
+.sheet-close .btn-title { font-size: 1.0625rem; }
+
+/* ---------- confirm ---------- */
+
+.confirm-card { max-width: 22rem; }
+.confirm-title { margin: 0 0 .5rem; font-size: 1.375rem; font-weight: 650; }
+.confirm-actions { display: grid; gap: .75rem; margin-top: 1.5rem; }
+.confirm-actions .btn { min-height: 3.5rem; justify-content: center; text-align: center; }
+.confirm-actions .btn-title { font-size: 1.0625rem; }
+.confirm-yes { background: rgba(127, 29, 29, .92); border-color: #ef4444; }
+.confirm-no  { background: rgba(21, 31, 51, .92); }
+
 /* ---------- footer ---------- */
 
 .foot {

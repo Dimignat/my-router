@@ -164,6 +164,8 @@ targets, and a status lamp that always pairs colour with words.
 | **Переподключиться** (Reconnect) | `?action=reconnect` | Re-tests node latency, forces the urltest group to re-pick. Existing connections survive. | ~5 s |
 | **Перезапустить** (Reload) | `?action=reload` | `/etc/init.d/netshift restart`. Internet blips; **Wi-Fi stays up**, nobody is kicked off. | ~10 s |
 | **Проверить обновления** (Update) | `?action=update` | Pulls master from GitHub immediately instead of waiting for the 15-min cron. Reports whether a new version was installed or the router was already current. | ~5 s |
+| **Выбрать страну** (Country) | `?action=servers`, `?action=select&node=` | Opens a list of exit countries and pins traffic to one, for sites blocked in a single country. "Автоматически" returns to lowest-latency selection. | ~3 s |
+| **Перезагрузить роутер** (Reboot) | `?action=reboot` | Full device restart, behind a confirmation. Wi-Fi drops ~2 min; the page polls and reloads itself when the router is back. | ~2 min |
 
 The footer shows the running node and the installed commit (`Версия fdb1cc7`),
 so you can tell at a glance which version a device is on without SSH.
@@ -176,6 +178,42 @@ CSS animation on `.splash` — deliberately not JS — so a script failure can
 never leave a user staring at a photo they cannot dismiss. `app.js` only tidies
 up afterwards (removes the node, allows a tap to skip). Users who set
 *reduce motion* skip the intro entirely.
+
+### Exit countries
+
+`node_country()` in `cgi-bin/router-api` maps each outbound tag to a country,
+city and ISO code. The GUI renders flags from the ISO code, so no image assets
+are needed.
+
+| Tag | Host prefix | Country |
+|---|---|---|
+| `redshield-1-out` | `stm` | Sweden, Stockholm — **verified by exit IP** |
+| `redshield-2-out` | `po` | Poland, Warsaw — **verified by exit IP** |
+| `redshield-3-out` | `fin` | Finland, Helsinki |
+| `redshield-4-out` | `fra` | Germany, Frankfurt |
+| `redshield-5-out` | `sw` | Switzerland, Zurich |
+| `redshield-6-out` | `ams` | Netherlands, Amsterdam |
+| `redshield-7-out` | `lt` | Lithuania, Vilnius |
+| `redshield-8-out` | `lv` | Latvia, Riga |
+| `redshield-9-out` | `au` | Austria, Vienna |
+
+**These names come from the hostname prefix, not from the provider.** Only the
+first two were confirmed against a real exit IP; the rest are inferred. Note
+the server *addresses* resolve to Prague, which is the entry point, not the
+exit — do not label nodes from `dig` output. To check one:
+
+```bash
+netshift clash_api set_group_proxy redshield-out redshield-N-out
+# then, from a LAN client (not the router -- its own traffic bypasses tproxy):
+curl -s https://api.ipify.org
+netshift clash_api set_group_proxy redshield-out redshield-urltest-out   # restore
+```
+
+If nodes are added, removed or reordered in `netshift.redshield.urltest_proxy_links`,
+update `node_country()` to match — the mapping is positional.
+
+A node whose latency check fails is shown as "Недоступен" but stays selectable,
+since a failed check does not always mean a dead node.
 
 ### Changing the background
 
