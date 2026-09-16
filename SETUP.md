@@ -101,6 +101,12 @@ netshift component_action sing_box install_extended
 netshift show_sing_box_version     # expect 1.14.0-extended
 ```
 
+> This syntax comes from `netshift`'s own CLI help on the reference router
+> (`component_action <component> <action>`, e.g. `sing_box install_extended`).
+> If it errors on 0.9.7, run `netshift` with no arguments to see the current
+> help and adjust. The feed's plain `sing-box` (1.12.22) also works for basic
+> VLESS, so treat this as an upgrade rather than a hard requirement.
+
 Verify:
 
 ```bash
