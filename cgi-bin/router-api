@@ -58,19 +58,31 @@ do_reload() { /etc/init.d/netshift restart; }
 # Country labels for the proxy nodes. Derived from each outbound's hostname
 # prefix, with the two we could confirm by exit IP (Stockholm, Warsaw) checked
 # against a real request. If nodes are added or reordered in UCI, update this.
+# The mapping is positional, and routers differ in key order, so derive it from
+# each outbound's own hostname prefix instead of hardcoding node numbers.
+# Falls back to the tag when a prefix is unknown, rather than mislabelling it.
 node_country() {
-    case "$1" in
-        *-1-out) echo "Швеция|Стокгольм|SE" ;;
-        *-2-out) echo "Польша|Варшава|PL" ;;
-        *-3-out) echo "Финляндия|Хельсинки|FI" ;;
-        *-4-out) echo "Германия|Франкфурт|DE" ;;
-        *-5-out) echo "Швейцария|Цюрих|CH" ;;
-        *-6-out) echo "Нидерланды|Амстердам|NL" ;;
-        *-7-out) echo "Литва|Вильнюс|LT" ;;
-        *-8-out) echo "Латвия|Рига|LV" ;;
-        *-9-out) echo "Австрия|Вена|AT" ;;
-        *)       echo "||" ;;
+    prefix=$(echo "$2" | cut -d. -f1 | tr "A-Z" "a-z")
+    case "$prefix" in
+        stm) echo "Швеция|Стокгольм|SE" ;;
+        po)  echo "Польша|Варшава|PL" ;;
+        fin) echo "Финляндия|Хельсинки|FI" ;;
+        fra) echo "Германия|Франкфурт|DE" ;;
+        sw)  echo "Швейцария|Цюрих|CH" ;;
+        ams) echo "Нидерланды|Амстердам|NL" ;;
+        lt)  echo "Литва|Вильнюс|LT" ;;
+        lv)  echo "Латвия|Рига|LV" ;;
+        au)  echo "Австрия|Вена|AT" ;;
+        *)   echo "||" ;;
     esac
+}
+
+# Server hostname for an outbound tag, read from the generated sing-box config.
+# grep/sed rather than awk: no quoting minefield inside this CGI.
+node_host() {
+    grep -A6 "\"tag\": \"$1\"" /etc/sing-box/config.json 2>/dev/null |
+        grep -m1 '"server":' |
+        sed 's/.*"server": "\([^"]*\)".*/\1/'
 }
 
 # List every node with its country and last known latency, so the GUI can offer
@@ -97,7 +109,8 @@ emit_servers() {
         # Skip nodes that do not exist in this config.
         echo "$proxies" | grep -q "\"$tag\"" || continue
 
-        info=$(node_country "$tag")
+        host=$(node_host "$tag")
+        info=$(node_country "$tag" "$host")
         country=$(echo "$info" | cut -d"|" -f1)
         city=$(echo "$info" | cut -d"|" -f2)
         code=$(echo "$info" | cut -d"|" -f3)
