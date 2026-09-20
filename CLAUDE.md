@@ -27,7 +27,7 @@ Gotchas that will bite you:
 - **Login is `root`.** `ssh 192.168.2.1` uses your local username and fails.
 - **No `scp`/`sftp`** — dropbear has no sftp-server. Pipe over stdin instead:
   ```bash
-  tar czf - www cgi-bin scripts | ssh root@192.168.2.1 'tar xzf - -C /tmp/mr'
+  tar czf - -C router www cgi-bin scripts | ssh root@192.168.2.1 'tar xzf - -C /tmp/mr'
   ```
 - **No `git`** on the device. Updates use `curl` + the GitHub tarball API.
 - **No `timeout`**, no bash. It's BusyBox `ash` — POSIX sh only, no bashisms.
@@ -101,13 +101,13 @@ netshift list_update         # refresh domain lists (also runs daily at 09:13 vi
 
 | Repo path | On the router | Purpose |
 |---|---|---|
-| `www/` | `/www/app/` | Kiosk GUI, served by stock uhttpd |
-| `www/img/background.webp` | `/www/app/img/` | Background photo (see below) |
-| `cgi-bin/router-api` | `/www/cgi-bin/router-api` | JSON control API (CGI) |
-| `cgi-bin/index-router` | `/www/cgi-bin/index-router` | Root dispatcher: GUI on the friendly name, LuCI otherwise |
-| `scripts/my-router-update` | `/usr/bin/my-router-update` | Pulls master, applies it |
-| `scripts/install.sh` | — | Installer; also used by the updater |
-| `config/settings.conf` | `/etc/my-router/settings.conf` | Repo/branch; seeded once, never overwritten |
+| `router/www/` | `/www/app/` | Kiosk GUI, served by stock uhttpd |
+| `router/www/img/background.webp` | `/www/app/img/` | Background photo (see below) |
+| `router/cgi-bin/router-api` | `/www/cgi-bin/router-api` | JSON control API (CGI) |
+| `router/cgi-bin/index-router` | `/www/cgi-bin/index-router` | Root dispatcher: GUI on the friendly name, LuCI otherwise |
+| `router/scripts/my-router-update` | `/usr/bin/my-router-update` | Pulls master, applies it |
+| `router/scripts/install.sh` | — | Installer; also used by the updater |
+| `router/config/settings.conf` | `/etc/my-router/settings.conf` | Repo/branch; seeded once, never overwritten |
 
 State the router keeps: `/etc/my-router/version` (applied commit SHA) and
 `/etc/my-router/last-update`.
@@ -115,7 +115,7 @@ State the router keeps: `/etc/my-router/version` (applied commit SHA) and
 ### Deploy from a dev machine
 
 ```bash
-tar czf - www cgi-bin scripts config \
+tar czf - -C router www cgi-bin scripts config \
   | ssh root@192.168.2.1 'rm -rf /tmp/mr && mkdir -p /tmp/mr && tar xzf - -C /tmp/mr \
                           && sh /tmp/mr/scripts/install.sh'
 ```
@@ -181,7 +181,7 @@ up afterwards (removes the node, allows a tap to skip). Users who set
 
 ### Exit countries
 
-`node_country()` in `cgi-bin/router-api` maps each outbound tag to a country,
+`node_country()` in `router/cgi-bin/router-api` maps each outbound tag to a country,
 city and ISO code. The GUI renders flags from the ISO code, so no image assets
 are needed.
 
@@ -217,18 +217,18 @@ since a failed check does not always mean a dead node.
 
 ### Changing the background
 
-The page background is `www/img/background.webp`. To change it on every
+The page background is `router/www/img/background.webp`. To change it on every
 router, replace that file and push:
 
 ```bash
-cp /path/to/new.webp www/img/background.webp
+cp /path/to/new.webp router/www/img/background.webp
 git commit -am "New background" && git push
 ```
 
 Routers pick it up on the next 15-minute poll, or immediately via the
 **Проверить обновления** button.
 
-- Keep the same filename, or update the `url()` in `www/style.css`.
+- Keep the same filename, or update the `url()` in `router/www/style.css`.
 - WebP, JPEG and PNG all work. Keep it small — it ships to every router over
   the tunnel, and the overlay has ~150 MB free. The current file is 10 KB.
 - The installer stamps `?v=<timestamp>` onto the stylesheet, script and
@@ -291,10 +291,12 @@ Every router runs `*/15 * * * * /usr/bin/my-router-update`. Each run:
    from the same cache. Don't remove it.
 2. Compares to `/etc/my-router/version`; exits if equal.
 3. Downloads `codeload.github.com/<repo>/tar.gz/<sha>`, extracts to `/tmp`.
-4. **Sanity-checks the tree** (`www/` and `cgi-bin/router-api` must exist).
-5. Runs the *downloaded* `scripts/install.sh` — so update logic ships with the
+4. Descends into `router/`, where the device payload lives. A tree without it
+   is treated as a pre-move commit and used as-is, so a rollback still applies.
+5. **Sanity-checks the tree** (`www/` and `cgi-bin/router-api` must exist).
+6. Runs the *downloaded* `scripts/install.sh` — so update logic ships with the
    content and can fix itself.
-6. Writes the new SHA only on success.
+7. Writes the new SHA only on success.
 
 Safety properties worth preserving if you change this:
 
@@ -320,7 +322,7 @@ logread -e my-router-update
 
 ```bash
 ssh root@<ip>   # verify netshift + sing-box are installed and working
-tar czf - www cgi-bin scripts config | ssh root@<ip> \
+tar czf - -C router www cgi-bin scripts config | ssh root@<ip> \
   'rm -rf /tmp/mr && mkdir -p /tmp/mr && tar xzf - -C /tmp/mr && sh /tmp/mr/scripts/install.sh'
 ```
 

@@ -181,7 +181,7 @@ From your computer, in a checkout of this repo:
 
 ```bash
 NEW=192.168.3.1
-tar czf - www cgi-bin scripts config | ssh root@$NEW \
+tar czf - -C router www cgi-bin scripts config | ssh root@$NEW \
   'rm -rf /tmp/mr && mkdir -p /tmp/mr && tar xzf - -C /tmp/mr && sh /tmp/mr/scripts/install.sh'
 ```
 
