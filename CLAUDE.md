@@ -108,9 +108,11 @@ netshift list_update         # refresh domain lists (also runs daily at 09:13 vi
 | `scripts/my-router-update` | `/usr/bin/my-router-update` | Pulls master, applies it |
 | `scripts/install.sh` | — | Installer; also used by the updater |
 | `config/settings.conf` | `/etc/my-router/settings.conf` | Repo/branch; seeded once, never overwritten |
+| `scripts/my-router-blocklist` | `/usr/bin/my-router-blocklist` | Domain blocklist tool (see below) |
+| `config/blocklist.txt` | `/etc/my-router/blocklist.txt` | Blocked domains; seeded once, never overwritten |
 
-State the router keeps: `/etc/my-router/version` (applied commit SHA) and
-`/etc/my-router/last-update`.
+State the router keeps: `/etc/my-router/version` (applied commit SHA),
+`/etc/my-router/last-update` and `/etc/my-router/blocklist.applied`.
 
 ### Deploy from a dev machine
 
@@ -149,6 +151,38 @@ the `@domain` entries are answered by dnsmasq itself and are unaffected.
 
 LuCI answers unauthenticated requests with **HTTP 403 and a login page** — that
 is normal, not a fault of this setup.
+
+### Blocking domains
+
+Each router has its own list at `/etc/my-router/blocklist.txt`, one domain per
+line. It is per-router state like `settings.conf`, so the list never lands in
+this public repo and an update never resets it.
+
+```bash
+my-router-blocklist add tiktok.com vk.com   # block (URLs and www. are fine)
+my-router-blocklist remove vk.com           # unblock
+my-router-blocklist list                    # what is blocked now
+my-router-blocklist                         # re-apply after editing the file by hand
+```
+
+A domain blocks all its subdomains. dnsmasq answers them `NXDOMAIN` itself, so
+the query never reaches sing-box and the block holds whether the site would go
+through the tunnel or `direct-out`.
+
+- Entries live in the UCI list `dhcp.@dnsmasq[0].address` as `/domain/`.
+  NetShift only rewrites `server`, `noresolv` and `cachesize` there, so they
+  survive tunnel restarts. The ones the tool owns are tracked in
+  `blocklist.applied`; addresses added by hand in LuCI are left alone.
+- `apply` restarts dnsmasq only when the list actually changed, and the
+  installer runs it on every update.
+- It refuses `.lan` names and the GitHub hosts the updater needs.
+- A client that resolved a domain just before it was blocked keeps working
+  until its DNS cache expires (`dns_rewrite_ttl` is 60 s) and its open
+  connections close.
+- **Only clients that use the router's DNS are affected.** Phones with
+  private/secure DNS and browsers with DNS-over-HTTPS walk around it. Adding
+  `use-application-dns.net` to the list stops Firefox from turning DoH on by
+  itself; the seeded file has it commented out.
 
 ---
 
@@ -342,5 +376,6 @@ credentials on the device via UCI — never in this repo.
 | Node shows "unknown" | Normal for ~15 s after a restart (`settling:1`) |
 | Update not applying | `logread -e my-router-update`; `cat /etc/my-router/version`; stale lock: `rmdir /var/lock/my-router-update.lock` |
 | Update says "already current" right after a push | The `?cb=` cache-buster is missing from the SHA request — see step 1 above |
+| Blocked site still opens | `nslookup <domain> 192.168.2.1` should say `NXDOMAIN`. If it does, the client isn't using the router's DNS (private DNS / DoH) or has it cached. If not: `my-router-blocklist list`, `logread -e my-router-blocklist`, `uci get dhcp.@dnsmasq[0].address` |
 | Router full | `df -h /overlay` — 149 MB free; job logs live in `/tmp` (tmpfs, cleared on reboot) |
 

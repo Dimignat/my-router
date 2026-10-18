@@ -72,6 +72,19 @@ if [ -f "$SRC/config/settings.conf" ] && [ ! -f "$STATE_DIR/settings.conf" ]; th
     log "seeded $STATE_DIR/settings.conf"
 fi
 
+# --- domain blocklist -----------------------------------------------------
+# The list itself is per-router state: seeded once, never overwritten.
+log "installing blocklist tool to /usr/bin/my-router-blocklist"
+cp "$SRC/scripts/my-router-blocklist" /usr/bin/my-router-blocklist.new
+chmod +x /usr/bin/my-router-blocklist.new
+mv /usr/bin/my-router-blocklist.new /usr/bin/my-router-blocklist
+
+if [ -f "$SRC/config/blocklist.txt" ] && [ ! -f "$STATE_DIR/blocklist.txt" ]; then
+    cp "$SRC/config/blocklist.txt" "$STATE_DIR/blocklist.txt"
+    log "seeded $STATE_DIR/blocklist.txt"
+fi
+/usr/bin/my-router-blocklist apply
+
 # --- cron: poll master every 15 minutes -----------------------------------
 CRON_LINE='*/15 * * * * /usr/bin/my-router-update >/dev/null 2>&1'
 if ! crontab -l 2>/dev/null | grep -qF 'my-router-update'; then

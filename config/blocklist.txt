@@ -1,0 +1,13 @@
+# Domains blocked for everyone on this router's network.
+# Copied to /etc/my-router/blocklist.txt on first install and never
+# overwritten by updates, so each router keeps its own list.
+#
+# One domain per line. Each one also blocks all its subdomains, so
+# "tiktok.com" covers www.tiktok.com, m.tiktok.com, ...
+#
+# After editing this file on the router, run: my-router-blocklist
+# Or skip editing and use:  my-router-blocklist add tiktok.com
+#
+# Firefox may switch to its own encrypted DNS and walk around this list.
+# Uncomment the next line to tell it not to (it only disables that):
+# use-application-dns.net

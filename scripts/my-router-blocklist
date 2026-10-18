@@ -1,0 +1,145 @@
+#!/bin/sh
+# Block domains for the whole LAN via dnsmasq.
+#
+#   my-router-blocklist                  apply /etc/my-router/blocklist.txt
+#   my-router-blocklist list             show what is blocked
+#   my-router-blocklist add DOMAIN...    block, e.g. tiktok.com
+#   my-router-blocklist remove DOMAIN... unblock
+#
+# Each domain is blocked together with all its subdomains: dnsmasq answers
+# NXDOMAIN before the query ever reaches sing-box. Entries go into the UCI list
+# dhcp.@dnsmasq[0].address, which netshift leaves alone. The ones we added are
+# tracked in blocklist.applied, so addresses set by hand in LuCI are untouched.
+
+set -u
+
+STATE_DIR=/etc/my-router
+LIST="$STATE_DIR/blocklist.txt"
+APPLIED="$STATE_DIR/blocklist.applied"
+
+# Names the router itself needs. Blocking these (or a parent of them) would
+# cut off updates or the GUI's own hostname.
+PROTECTED="router.lan api.github.com codeload.github.com raw.githubusercontent.com"
+
+# stderr, because domains() runs inside $(...) and its output is the list.
+log() { echo "[blocklist] $*" >&2; logger -t my-router-blocklist "$*"; }
+
+# "https://www.Example.com:443/path" -> "example.com"
+normalize() {
+    printf '%s\n' "$1" | tr 'A-Z' 'a-z' | sed \
+        -e 's/[[:space:]]//g' \
+        -e 's|^[a-z]*://||' \
+        -e 's|[/?#].*$||' \
+        -e 's|:[0-9]*$||' \
+        -e 's/^\*\.//' \
+        -e 's/^\.*//' \
+        -e 's/\.*$//' \
+        -e 's/^www\.//'
+}
+
+# Prints the reason a normalized domain can't be blocked; silent if it can.
+invalid() {
+    d="$1"
+    printf '%s\n' "$d" |
+        grep -qE '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$' ||
+        { echo "not a domain name"; return; }
+    case "$d" in *.lan|lan) echo "local name"; return ;; esac
+    for p in $PROTECTED; do
+        case "$p" in "$d"|*".$d") echo "the router needs $p"; return ;; esac
+    done
+}
+
+# Valid, normalized, de-duplicated domains from the list file.
+domains() {
+    [ -f "$LIST" ] || return 0
+    sed 's/#.*//' "$LIST" | while read -r line; do
+        [ -n "$line" ] || continue
+        d=$(normalize "$line")
+        why=$(invalid "$d")
+        if [ -n "$why" ]; then
+            log "skipping '$line': $why"
+            continue
+        fi
+        echo "$d"
+    done | sort -u
+}
+
+apply() {
+    # Sort after wrapping, the same way $have is sorted, or the order can
+    # differ and every run would look like a change.
+    want=$(domains | sed 's|.*|/&/|' | sort -u)
+    have=$(sort -u "$APPLIED" 2>/dev/null)
+    if [ "$want" = "$have" ]; then
+        return 0
+    fi
+
+    for e in $have; do uci -q del_list dhcp.@dnsmasq[0].address="$e"; done
+    for e in $want; do uci add_list dhcp.@dnsmasq[0].address="$e"; done
+    uci commit dhcp
+
+    if [ -n "$want" ]; then
+        printf '%s\n' $want > "$APPLIED"
+    else
+        rm -f "$APPLIED"
+    fi
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1
+    log "blocking $(printf '%s\n' $want | grep -c .) domain(s)"
+}
+
+cmd="${1:-apply}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+    apply)
+        apply
+        ;;
+    list)
+        domains
+        ;;
+    add)
+        [ $# -gt 0 ] || { echo "usage: $0 add DOMAIN..." >&2; exit 2; }
+        mkdir -p "$STATE_DIR"
+        rc=0
+        for arg in "$@"; do
+            d=$(normalize "$arg")
+            why=$(invalid "$d")
+            if [ -n "$why" ]; then
+                echo "can't block '$arg': $why" >&2
+                rc=1
+            elif domains | grep -qxF "$d"; then
+                echo "$d is already blocked"
+            else
+                echo "$d" >> "$LIST"
+                echo "blocked $d"
+            fi
+        done
+        apply
+        exit $rc
+        ;;
+    remove)
+        [ $# -gt 0 ] || { echo "usage: $0 remove DOMAIN..." >&2; exit 2; }
+        [ -f "$LIST" ] || exit 0
+        for arg in "$@"; do
+            d=$(normalize "$arg")
+            # Drop every spelling of it (www., https://..., etc.), keep comments.
+            tmp="$LIST.tmp"
+            while IFS= read -r line; do
+                case "$line" in
+                    \#*|"") echo "$line" ;;
+                    *) [ "$(normalize "$line")" = "$d" ] || echo "$line" ;;
+                esac
+            done < "$LIST" > "$tmp"
+            if cmp -s "$tmp" "$LIST"; then
+                echo "$d was not blocked"
+            else
+                echo "unblocked $d"
+            fi
+            mv "$tmp" "$LIST"
+        done
+        apply
+        ;;
+    *)
+        echo "usage: $0 [apply|list|add DOMAIN...|remove DOMAIN...]" >&2
+        exit 2
+        ;;
+esac
