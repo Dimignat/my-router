@@ -1,0 +1,21 @@
+# Devices in this set may use the local LAN, but cannot reach the internet.
+# Run before NetShift prerouting at priority -150.
+set iot_offline_macs {
+    type ether_addr
+    elements = { 00:4b:12:4d:14:38 }
+}
+
+chain iot_offline_destinations {
+    ip daddr 192.168.2.0/24 return
+    ip daddr 255.255.255.255 return
+    ip daddr 224.0.0.0/4 return
+    ip6 daddr fc00::/7 return
+    ip6 daddr fe80::/10 return
+    ip6 daddr ff02::/16 return
+    counter drop comment "Block offline IoT internet before NetShift"
+}
+
+chain iot_offline_prerouting {
+    type filter hook prerouting priority -160; policy accept;
+    iifname "br-lan" ether saddr @iot_offline_macs jump iot_offline_destinations
+}

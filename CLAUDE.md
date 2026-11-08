@@ -331,6 +331,11 @@ credentials on the device via UCI — never in this repo.
 
 ## 6. Troubleshooting
 
+The kettle's internet block is documented in [IOT-OFFLINE.md](IOT-OFFLINE.md).
+Its persistent firewall4 include is tracked at `config/20-iot-offline.nft` and
+installed separately at `/etc/nftables.d/20-iot-offline.nft`. It filters before
+NetShift; do not replace it with only a normal forwarding rule.
+
 | Symptom | Check |
 |---|---|
 | GUI unreachable | `/etc/init.d/uhttpd restart`; is `/www/app/index.html` there? |
